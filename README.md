@@ -1,2 +1,2 @@
 # Task-Scheduler
-A task scheduler for ATmega328p
+A task scheduler for ATmega328p.
