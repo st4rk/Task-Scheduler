@@ -4,32 +4,44 @@
 /**
  * Heap Memory Array used to heap allocation
  */
-static unsigned char __heapmem[configMAX_HEAP_LEN];
+static node_t __sysTask[configMAX_SYS_TASK];
+
+/**
+ * Global current task stack pointer
+ */
+volatile unsigned short* pxCurrentTCB;
+
 
 /**
  * Task list head
  */
-
 node_t *taskList = NULL;
 
 /**
- * Embedded malloc to scheduler
- * TODO: Improve the code
+ * =============================================================
+ * This function search for a free task in the __sysTask array
+ * if no free task is found, it should return NULL
+ * @ return either a pointer to the node or nullptr
+ * =============================================================
  */
-void* malloc(unsigned char size) {
-	static unsigned char heapPos = 0x00;
-
-	if (heapPos > configMAX_HEAP_LEN) {
-		return 0;
-	} else if ((heapPos + size) > configMAX_HEAP_LEN) {
-		return 0;
-	} else {
-		unsigned char oldPos = heapPos;
-		heapPos += size;
-		return __heapmem[oldPos];		
+inline node_t* allocNode() {
+	for (int i = 0; i < configMAX_SYS_TASK; i++) {
+		if (__sysTask[i].id == 0x0) {
+			return &__sysTask[i];
+		} 
 	}
 
-	return 0;
+	return NULL;
+}
+
+/**
+ * ============================================
+ * To remove the node, just clear its memory.
+ * @ 1 - node pointer
+ * ============================================
+ */
+inline void removeNode(node_t* node) {
+	memset(node, 0x0, sizeof(node_t));
 }
 
 /**
@@ -69,15 +81,8 @@ inline void removeTask( TaskHandle_t xTask ) {
 
 	while (1) {
 		if (aux->id == xTask) {
-			/**
-			 * TODO: How to write the removeTask
-			 * The problem is that there is no mem management
-			 * even if I clear teh memory, the malloc won't
-			 * detect this memory block, so to write it
-			 * I need to write a better malloc  
-			 */
-
-			 break;
+			removeNode(aux);
+			break;
 		}
 
 		if (aux->next == NULL) break;
@@ -87,45 +92,93 @@ inline void removeTask( TaskHandle_t xTask ) {
 }
 
 
+inline node_t* findHighPriorityTask() {
+	node_t* aux = taskList;
+
+	/**
+	 * Check if the next is NULL, if yes, the root that has 
+	 * the high priority
+	 */
+
+	while (1) {
+		if (aux->task->priority == TASK_STATUS_SUSPENDED) {
+			if (aux->next != NULL) {
+				aux = aux->next;
+			} else {
+				return NULL;
+			}
+		}
+
+		if (aux->next == NULL) break;
+
+		if (aux->next->task.priority > aux->task.priority) {
+			if (aux->next->task.state == TASK_STATUS_READY)
+				aux = aux->next;
+		}
+	}
+
+
+	return aux;
+}
+
+
 /**
- * This function is the timer0 compare interrupt handle
+ * ===========================================================
+ * This function is the timer2 compare interrupt handle
  * everytime that the timer reach the desired value
  * this interrupt handler will be triggered.
  * Here we will write our task scheduler that will
  * check which task is ready and that task has high-priority
  * and start it
+ * ===========================================================
  */
-ISR (TIMER0_COMPA_vect) {
-	
+ISR (TIMER2_COMPA_vect, ISR_NAKED) {
+
+
+	node_t* aux = findHighPriorityTask();
+
+	/**
+	 * Verify if it return != NULL, otherwise we won't do nothing
+	 */
+	if (aux == NULL) {
+		
+	} else {
+
+	}
+
+	/**
+	 * AVR Instruction to return from interruption
+	 */
+	asm volatile("RETI");
 }
 
 BaseType_t xInitTaskScheduler() {
 
-
-	/**
-	 * Calculate timer OCRn value
-	 * OCRx = [(MCU_FREQ/PreScale) * time_in_sec] - 1
-	 */
-
 	/** 
 	 * Enable timer mode to CTC
 	 */
-	TCCR0A |= (1 << WGM01);
+	TCCR2A |= (1 << WGM21);
 
 	/**
 	 * 1ms delay (using 16mhz clock freq and 64 prescale)
 	 */
-	OCR0A = 249;
+	OCR2A = configTASK_SCHEDULER_TMR;
 
 	/**
 	 * Set interrupt vector to timer0
 	 */
-	TIMSK0 |= (1 << OCIE0A); 
+	TIMSK2 |= (1 << OCIE2A); 
 
 	/**
 	 * Set prescale to 64
 	 */
-	TCCR0B |= (1 << CS01) | (1 << CS00);
+	TCCR2B |= (1 << CS22);
+
+	/**
+	 * Clear the __sysTask
+	 */
+	memset(__sysTask, 0x0, sizeof(node_t) * configMAX_SYS_TASK);
+
 
 	/**
 	 * Enable interrupts
@@ -146,29 +199,31 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 	/**
 	 * Allocate a new task
 	 */
-	node_t *newTask = (node_t) malloc (sizeof(node_t));
-
+	node_t *newTask = allocNode();
 
 	/**
-	 * Copy the task name
+	 * Check if it return NULL, if yes, it has already the max
+	 * number of task, so we must return an error.
 	 */
-	unsigned char i = 0x0;
-	while (pcName[i] != '\0') { 
-		if (i > 8) { 
-			break; 
-		} else {
-			newTask->task.name = pcName[i];
-		}
-	}
+	if (newTask == NULL) return TASK_CREATE_INVALID_TASK;
+
+	strcpy(newTask->task.name, pcName);
+
+	/**
+	 * Check if the entry-point is valid, otherwise we must 
+	 * return an error.
+	 */
+	if (pvTaskCode == NULL) return TASK_CREATE_INVALID_FUNCTION;
 
 	/**
 	 * Set priority, state and entrypoint and the next task to null
 	 */
+
 	newTask->task.priority   = uxPriority
 	newTask->task.state      = TASK_STATUS_READY;
 	newTask->task.entryPoint = pvTaskCode;
-	newTask->id              = 0x0;
-	newTask->next = NULL;
+	newTask->id              = 0x1;
+	newTask->next            = NULL;
 
 	/**
 	 * Inser the task into the List

@@ -20,19 +20,34 @@
 
 
 /**
+ * The max number of task that the system can have
+ * as we have limited memory, we define the max number here
+ */
+#define configMAX_SYS_TASK 0x4
+
+
+/**
  * The lowest priority, the created task should use tskIDLE_PRIORITY+Priority
  * i.e: tskIDLE_PRIORITY+3
  */
 #define tskIDLE_PRIORITY 0x0
+
+
+/**
+ * The Timer2 interrupt time, it's currently using 64 prescale + 16mhz to hae
+ * 1 ms, if you want to change it, follow this:
+ * desired_time = [(mcu_freq/prescale) * desired_time_in_second] - 1
+ */
+
+#define configTASK_SCHEDULER_TMR = 249;
 
 /**
  * xTaskCreate Error List
  */
 
 #define TASK_CREATE_INVALID_FUNCTION 0x1
-#define TASK_CREATE_INVALID_NAME     0x2
-#define TASK_CREATE_INVALID_STACK    0x3
-#define TASK_CREATE_INVALID_PRIORITY 0x4
+#define TASK_CREATE_INVALID_STACK    0x2
+#define TASK_CREATE_INVALID_TASK     0x3
 
 
 /**
