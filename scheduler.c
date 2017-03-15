@@ -7,15 +7,14 @@
 static node_t __sysTask[configMAX_SYS_TASK];
 
 /**
- * Global current task stack pointer
+ * Global current task
  */
-volatile unsigned short* pxCurrentTCB;
-
+volatile task_t* c_Task = NULL;
 
 /**
  * Task list head
  */
-node_t *taskList = NULL;
+volatile node_t *taskList = NULL;
 
 /**
  * =============================================================
@@ -92,7 +91,7 @@ inline void removeTask( TaskHandle_t xTask ) {
 }
 
 
-inline node_t* findHighPriorityTask() {
+inline task_t* findHighPriorityTask() {
 	node_t* aux = taskList;
 
 	/**
@@ -101,11 +100,21 @@ inline node_t* findHighPriorityTask() {
 	 */
 
 	while (1) {
-		if (aux->task->priority == TASK_STATUS_SUSPENDED) {
-			if (aux->next != NULL) {
-				aux = aux->next;
+
+		if (aux->task.state == TASK_STATUS_SUSPENDED) {
+			/**
+			 * Decrement the timer
+			 */
+
+			aux->task.tmr--;
+			if (!aux->task) {
+				aux->task.state = TASK_STATUS_READY;
 			} else {
-				return NULL;
+				if (aux->next != NULL) {
+					aux = aux->next;
+				} else {
+					return NULL;
+				}
 			}
 		}
 
@@ -118,7 +127,7 @@ inline node_t* findHighPriorityTask() {
 	}
 
 
-	return aux;
+	return &aux->task;
 }
 
 
@@ -134,17 +143,40 @@ inline node_t* findHighPriorityTask() {
  */
 ISR (TIMER2_COMPA_vect, ISR_NAKED) {
 
-
-	node_t* aux = findHighPriorityTask();
+	/**
+	 * Disable all interrupts, while we are in scheduler, no
+	 * interrupts should happen
+	 */
+	cli();
 
 	/**
-	 * Verify if it return != NULL, otherwise we won't do nothing
+	 * If it's running for the first time, you can't save the context
+	 * because it's not the task, but the "loop" from arduino (probably)
 	 */
-	if (aux == NULL) {
-		
-	} else {
+	if (c_Task != NULL) {
+		portSAVE_CONTEXT();
 
+		if (c_Task->state == TASK_STATUS_RUNNING)
+			c_Task->state = TASK_STATUS_READY;
 	}
+
+	
+	/**
+	 * Verify which task has the high priority
+	 */
+	c_Task = findHighPriorityTask();
+
+
+	/**
+	 * Restore the current high priority task context
+	 */
+	portRESTORE_CONTEXT();
+
+	/**
+	 * Enable all interrupts 
+	 */
+
+	sei();
 
 	/**
 	 * AVR Instruction to return from interruption
@@ -178,7 +210,6 @@ BaseType_t xInitTaskScheduler() {
 	 * Clear the __sysTask
 	 */
 	memset(__sysTask, 0x0, sizeof(node_t) * configMAX_SYS_TASK);
-
 
 	/**
 	 * Enable interrupts
@@ -231,12 +262,31 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 	insertNewTask(newTask);
 
 	if (pxCreatedTask != NULL) {
-		*pxCreatedTask = task->id;
+		*pxCreatedTask = newTask->task.id;
 	}
+
+	/** 
+	 * Setup and Clear Stack
+	 */	
+	unsigned short t_SP     = newTask->task.id * configMAX_TASK_STACK_SIZE + RAMEND;
+	newTask->task.SP_ctx[0] = t_SP & 0xFF;
+	newTask->task.SP_ctx[1] = t_SP >> 0x8;
+
+	/**
+	 * Clear the whole stack
+	 */
+	memset(t_SP+configMAX_TASK_STACK_SIZE, 0x0, configMAX_TASK_STACK_SIZE);
 }
 
 
 
 void vTaskDelete ( TaskHandle_t xTask ) {
 	removeTask (xTask);
+}
+
+
+void vTaskDelay (const UBaseType_t ms) {
+	c_Task->tmr = ms;
+
+	asm volatile("JMP TIMER2_COMPA_vect");
 }
