@@ -4,17 +4,23 @@
 /**
  * Heap Memory Array used to heap allocation
  */
-static node_t __sysTask[configMAX_SYS_TASK];
+node_t __sysTask[configMAX_SYS_TASK];
 
 /**
  * Global current task
  */
-volatile task_t* c_Task = NULL;
+task_t *c_Task = NULL;
 
 /**
  * Task list head
  */
-volatile node_t *taskList = NULL;
+node_t *taskList = NULL;
+
+/**
+ * Global Stack pointer from current task
+ */
+unsigned char* volatile stack_ptr = NULL;
+
 
 /**
  * =============================================================
@@ -107,7 +113,7 @@ inline task_t* findHighPriorityTask() {
 			 */
 
 			aux->task.tmr--;
-			if (!aux->task) {
+			if (!aux->task.tmr) {
 				aux->task.state = TASK_STATUS_READY;
 			} else {
 				if (aux->next != NULL) {
@@ -166,6 +172,11 @@ ISR (TIMER2_COMPA_vect, ISR_NAKED) {
 	 */
 	c_Task = findHighPriorityTask();
 
+
+	/**
+	 * Global stack pointer from current task
+	 */
+	stack_ptr = c_Task->SP_ctx;
 
 	/**
 	 * Restore the current high priority task context
@@ -250,7 +261,7 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 	 * Set priority, state and entrypoint and the next task to null
 	 */
 
-	newTask->task.priority   = uxPriority
+	newTask->task.priority   = uxPriority;
 	newTask->task.state      = TASK_STATUS_READY;
 	newTask->task.entryPoint = pvTaskCode;
 	newTask->id              = 0x1;
@@ -262,20 +273,20 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 	insertNewTask(newTask);
 
 	if (pxCreatedTask != NULL) {
-		*pxCreatedTask = newTask->task.id;
+		*pxCreatedTask = newTask->id;
 	}
 
 	/** 
 	 * Setup and Clear Stack
 	 */	
-	unsigned short t_SP     = newTask->task.id * configMAX_TASK_STACK_SIZE + RAMEND;
+	unsigned short t_SP     = newTask->id * configMAX_TASK_STACK_SIZE + RAMEND;
 	newTask->task.SP_ctx[0] = t_SP & 0xFF;
 	newTask->task.SP_ctx[1] = t_SP >> 0x8;
 
 	/**
 	 * Clear the whole stack
 	 */
-	memset(t_SP+configMAX_TASK_STACK_SIZE, 0x0, configMAX_TASK_STACK_SIZE);
+	memset((void*)(t_SP+configMAX_TASK_STACK_SIZE), 0x0, configMAX_TASK_STACK_SIZE);
 }
 
 
@@ -288,5 +299,10 @@ void vTaskDelete ( TaskHandle_t xTask ) {
 void vTaskDelay (const UBaseType_t ms) {
 	c_Task->tmr = ms;
 
+
+	/**
+	 * I'm not sure if this gonan work, but it should JMP direct to 
+	 * interrupt vector
+	 */
 	asm volatile("JMP TIMER2_COMPA_vect");
 }

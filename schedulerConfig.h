@@ -39,7 +39,7 @@
  * desired_time = [(mcu_freq/prescale) * desired_time_in_second] - 1
  */
 
-#define configTASK_SCHEDULER_TMR = 249;
+#define configTASK_SCHEDULER_TMR 249;
 
 /**
  * xTaskCreate Error List
