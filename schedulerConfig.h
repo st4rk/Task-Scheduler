@@ -41,6 +41,9 @@
 
 #define configTASK_SCHEDULER_TMR 249;
 
+
+#define TASK_OK 0x0
+
 /**
  * xTaskCreate Error List
  */

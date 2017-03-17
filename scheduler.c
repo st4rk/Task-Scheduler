@@ -9,12 +9,12 @@ node_t __sysTask[configMAX_SYS_TASK];
 /**
  * Global current task
  */
-task_t *c_Task = NULL;
+task_t * volatile c_Task = NULL;
 
 /**
  * Task list head
  */
-node_t *taskList = NULL;
+node_t * volatile taskList = NULL;
 
 /**
  * Global Stack pointer from current task
@@ -108,11 +108,13 @@ inline task_t* findHighPriorityTask() {
 	while (1) {
 
 		if (aux->task.state == TASK_STATUS_SUSPENDED) {
+
+		//	while (1) {}
 			/**
 			 * Decrement the timer
 			 */
 
-			aux->task.tmr--;
+		//	aux->task.tmr--;
 			if (!aux->task.tmr) {
 				aux->task.state = TASK_STATUS_READY;
 			} else {
@@ -184,18 +186,14 @@ ISR (TIMER2_COMPA_vect, ISR_NAKED) {
 	portRESTORE_CONTEXT();
 
 	/**
-	 * Enable all interrupts 
-	 */
-
-	sei();
-
-	/**
 	 * AVR Instruction to return from interruption
 	 */
-	asm volatile("RETI");
+	reti();
 }
 
-BaseType_t xInitTaskScheduler() {
+void xInitTaskScheduler() {
+
+	cli();
 
 	/** 
 	 * Enable timer mode to CTC
@@ -227,7 +225,6 @@ BaseType_t xInitTaskScheduler() {
 	 */
 	sei();
 
-	return 0;
 }
 
 BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
@@ -237,6 +234,8 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 						UBaseType_t uxPriority,
 						TaskHandle_t *pxCreatedTask
 					) {
+
+	static unsigned short gStack = RAMEND - configMAX_TASK_STACK_SIZE;
 
 	/**
 	 * Allocate a new task
@@ -249,6 +248,9 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 	 */
 	if (newTask == NULL) return TASK_CREATE_INVALID_TASK;
 
+	/**
+	 * Copy the name
+	 */
 	strcpy(newTask->task.name, pcName);
 
 	/**
@@ -263,7 +265,6 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 
 	newTask->task.priority   = uxPriority;
 	newTask->task.state      = TASK_STATUS_READY;
-	newTask->task.entryPoint = pvTaskCode;
 	newTask->id              = 0x1;
 	newTask->next            = NULL;
 
@@ -277,16 +278,49 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 	}
 
 	/** 
-	 * Setup and Clear Stack
+	 * Check if the stakc depth is big than max stack size per task
 	 */	
-	unsigned short t_SP     = newTask->id * configMAX_TASK_STACK_SIZE + RAMEND;
-	newTask->task.SP_ctx[0] = t_SP & 0xFF;
-	newTask->task.SP_ctx[1] = t_SP >> 0x8;
+	if (usStackDepth > configMAX_TASK_STACK_SIZE) 
+		return TASK_CREATE_INVALID_STACK;
 
 	/**
-	 * Clear the whole stack
+	 * PC (16 bits)
 	 */
-	memset((void*)(t_SP+configMAX_TASK_STACK_SIZE), 0x0, configMAX_TASK_STACK_SIZE);
+	*(UBaseType_t*)(gStack)    = (UBaseType_t)((unsigned short)(pvTaskCode) & 0xFF);
+	*(UBaseType_t*)(gStack-1)  = (UBaseType_t)((unsigned short)(pvTaskCode) >> 0x8);
+	
+	/**
+	 * R0, SREG, R1
+	 */
+	*(UBaseType_t*)(gStack-2)  = 0x0;
+	*(UBaseType_t*)(gStack-3)  = 0x80;
+	*(UBaseType_t*)(gStack-4)  = 0x0;
+
+	/**
+	 * R2 ~ R31
+	 */
+	for (int i = 5; i < 35; i++) {
+		*(UBaseType_t*)(gStack-i) = 0x0;
+	}
+
+	/**
+	 * TODO: I need to read how to pass the argument to the funciton
+	 * in this case, the calling convention
+	 */
+
+	/**
+	 * Configure stack location
+	 */
+	newTask->task.SP_ctx[0] = (UBaseType_t)((gStack-34) & 0xFF);
+	newTask->task.SP_ctx[1] = (UBaseType_t)((gStack-34) >> 0x8);
+
+	/**
+	 * Decrease the stack to the next task
+	 */
+	gStack = gStack - usStackDepth;
+
+
+	return TASK_OK;
 }
 
 
@@ -297,12 +331,16 @@ void vTaskDelete ( TaskHandle_t xTask ) {
 
 
 void vTaskDelay (const UBaseType_t ms) {
-	c_Task->tmr = ms;
+	cli();
 
+	c_Task->tmr = ms;
+	c_Task->state = TASK_STATUS_SUSPENDED;
+	
+	sei();
 
 	/**
 	 * I'm not sure if this gonan work, but it should JMP direct to 
 	 * interrupt vector
 	 */
-	asm volatile("JMP TIMER2_COMPA_vect");
+	//asm volatile("JMP TIMER2_COMPA_vect");
 }

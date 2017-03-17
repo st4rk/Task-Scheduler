@@ -8,8 +8,8 @@
  */
 
 
-#ifndef _SCHEDULER_
-#define _SCHEDULER_
+#ifndef _SCHEDULER_H_
+#define _SCHEDULER_H_
 
 #include <string.h>
 #include <avr/io.h>
@@ -22,7 +22,7 @@
  * This MACRO is used to store the 
  * current task context in stack
  */
-#define portSAVE_CONTEXT()           \
+#define portRESTORE_CONTEXT() \
   asm volatile ( \
     "lds r26, stack_ptr \n\t" \
     "lds r27, stack_ptr + 1 \n\t" \
@@ -71,7 +71,7 @@
  * This macro will restore the next
  * context from stack
  */
-#define portRESTORE_CONTEXT() \
+#define portSAVE_CONTEXT()           \
   asm volatile ( \
     "push r0 \n\t" \
     "in r0, __SREG__ \n\t" \
@@ -137,7 +137,6 @@ typedef void (*TaskFunction_t)(void*);
  */
 typedef struct task_t {
 	char name[configMAX_TASK_NAME_LEN];
-	TaskFunction_t entryPoint;
 	UBaseType_t priority;
 	UBaseType_t state; 
 	UBaseType_t tmr;
@@ -168,26 +167,34 @@ typedef struct node_t {
  * @ 6 - Pass out the created task's handle
  * ===========================================
  */
-extern BaseType_t xTaskCreate(  TaskFunction_t pvTaskCode,
-								const char * const pcName,
-								unsigned short usStackDepth,
-								void *pvParameters,
-								UBaseType_t uxPriority,
-								TaskHandle_t *pxCreatedTask
-							);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+	BaseType_t xTaskCreate(  TaskFunction_t pvTaskCode,
+									const char * const pcName,
+									unsigned short usStackDepth,
+									void *pvParameters,
+									UBaseType_t uxPriority,
+									TaskHandle_t *pxCreatedTask
+								);
+#ifdef __cplusplus
+}
+#endif
 
 /**
  * =========================================================
  * This function is used to initialize the task scheduler
  * No arguments
- * Return:
- * @ 0 - OKAY
- * @ 1 - An error occured while initializing the scheduler
  * =========================================================
  */
-extern BaseType_t xInitTaskScheduler();
-
+#ifdef __cplusplus
+extern "C" {
+#endif
+	void xInitTaskScheduler();
+#ifdef __cplusplus
+}
+#endif
 /**
  * ==========================================================
  * This function is used to remove a task from the task list
@@ -195,8 +202,13 @@ extern BaseType_t xInitTaskScheduler();
  * @ 1 - Task ID
  * ==========================================================
  */
-extern void vTaskDelete( TaskHandle_t xTask );
-
+#ifdef __cplusplus
+extern "C" {
+#endif
+	void vTaskDelete( TaskHandle_t xTask );
+#ifdef __cplusplus
+}
+#endif
 
 /**
  * ===========================================================
@@ -205,6 +217,12 @@ extern void vTaskDelete( TaskHandle_t xTask );
  * @ 1 - Time in milliseconds
  * ===========================================================
  */
-extern void vTaskDelay(const UBaseType_t ms);
+#ifdef __cplusplus
+extern "C" {
+#endif
+	void vTaskDelay(const UBaseType_t ms);
+#ifdef __cplusplus
+}
+#endif
 
 #endif
