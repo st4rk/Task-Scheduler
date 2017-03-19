@@ -1,5 +1,5 @@
 #include "scheduler.h"
-
+#include "serial.h"
 
 /**
  * Heap Memory Array used to heap allocation
@@ -15,12 +15,6 @@ task_t * volatile c_Task = NULL;
  * Task list head
  */
 node_t * volatile taskList = NULL;
-
-/**
- * Global Stack pointer from current task
- */
-unsigned char* volatile stack_ptr = NULL;
-
 
 /**
  * =============================================================
@@ -98,44 +92,62 @@ inline void removeTask( TaskHandle_t xTask ) {
 
 
 inline task_t* findHighPriorityTask() {
-	node_t* aux = taskList;
-
 	/**
-	 * Check if the next is NULL, if yes, the root that has 
-	 * the high priority
+	 * TODO: Write a better function
+	 * i.e: better suspended state detection
 	 */
+	node_t *hPriority = taskList;
+	node_t *nPriority = NULL;
+
+	if (hPriority->next == NULL) {
+		return &hPriority->task;
+	}
+
+	nPriority = hPriority->next;
 
 	while (1) {
+		/**
+		 * Sleep task
+		 */
+		if (hPriority->task.state == TASK_STATUS_SUSPENDED) {
+			hPriority->task.tmr--;
 
-		if (aux->task.state == TASK_STATUS_SUSPENDED) {
-
-		//	while (1) {}
-			/**
-			 * Decrement the timer
-			 */
-
-		//	aux->task.tmr--;
-			if (!aux->task.tmr) {
-				aux->task.state = TASK_STATUS_READY;
+			if (!hPriority->task.tmr) {
+				hPriority->task.state = TASK_STATUS_READY;
 			} else {
-				if (aux->next != NULL) {
-					aux = aux->next;
-				} else {
-					return NULL;
+				hPriority = nPriority;
+
+				if (hPriority->next == NULL) {
+					return &hPriority->task;
 				}
+
+				nPriority = hPriority->next;
+			}
+		} else {
+			if (nPriority->task.priority > hPriority->task.priority) {
+				if (nPriority->task.state == TASK_STATUS_SUSPENDED) {
+					nPriority->task.tmr--;
+
+					if (!nPriority->task.tmr) {
+						nPriority->task.state = TASK_STATUS_READY;
+						hPriority = nPriority;
+					}
+
+				} else {
+					hPriority = nPriority;
+				}
+			}
+	
+			if (nPriority->next != NULL) {
+				nPriority = nPriority->next;
+			} else {
+				return &hPriority->task;
 			}
 		}
 
-		if (aux->next == NULL) break;
-
-		if (aux->next->task.priority > aux->task.priority) {
-			if (aux->next->task.state == TASK_STATUS_READY)
-				aux = aux->next;
-		}
 	}
 
 
-	return &aux->task;
 }
 
 
@@ -168,23 +180,23 @@ ISR (TIMER2_COMPA_vect, ISR_NAKED) {
 			c_Task->state = TASK_STATUS_READY;
 	}
 
-	
 	/**
 	 * Verify which task has the high priority
 	 */
 	c_Task = findHighPriorityTask();
-
-
-	/**
-	 * Global stack pointer from current task
-	 */
-	stack_ptr = c_Task->SP_ctx;
 
 	/**
 	 * Restore the current high priority task context
 	 */
 	portRESTORE_CONTEXT();
 
+	//usart_send(SPL);
+	//usart_send(SPH);
+	//register char test asm("15");
+	//usart_send(test + 35);
+	//asm volatile("POP r15");
+	//usart_send(test + 35);
+	//while (1){}
 	/**
 	 * AVR Instruction to return from interruption
 	 */
@@ -216,11 +228,6 @@ void xInitTaskScheduler() {
 	TCCR2B |= (1 << CS22);
 
 	/**
-	 * Clear the __sysTask
-	 */
-	memset(__sysTask, 0x0, sizeof(node_t) * configMAX_SYS_TASK);
-
-	/**
 	 * Enable interrupts
 	 */
 	sei();
@@ -235,7 +242,7 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 						TaskHandle_t *pxCreatedTask
 					) {
 
-	static unsigned short gStack = RAMEND - configMAX_TASK_STACK_SIZE;
+	static UBaseType_t* gStack = (UBaseType_t*)(RAMEND - configMAX_TASK_STACK_SIZE);
 
 	/**
 	 * Allocate a new task
@@ -268,15 +275,6 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 	newTask->id              = 0x1;
 	newTask->next            = NULL;
 
-	/**
-	 * Inser the task into the List
-	 */
-	insertNewTask(newTask);
-
-	if (pxCreatedTask != NULL) {
-		*pxCreatedTask = newTask->id;
-	}
-
 	/** 
 	 * Check if the stakc depth is big than max stack size per task
 	 */	
@@ -284,24 +282,88 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 		return TASK_CREATE_INVALID_STACK;
 
 	/**
+	 * Decrease the stack to the next task
+	 */
+	*gStack = *gStack - usStackDepth;
+	/**
 	 * PC (16 bits)
 	 */
-	*(UBaseType_t*)(gStack)    = (UBaseType_t)((unsigned short)(pvTaskCode) & 0xFF);
-	*(UBaseType_t*)(gStack-1)  = (UBaseType_t)((unsigned short)(pvTaskCode) >> 0x8);
-	
+	unsigned short entry_ptr = (unsigned short)(pvTaskCode);
+
+	*(UBaseType_t*)(gStack)  = (UBaseType_t)(entry_ptr & 0xFF);
+	gStack--;
+	entry_ptr = entry_ptr >> 0x8;
+	*(UBaseType_t*)(gStack)  = (UBaseType_t)(entry_ptr & 0xFF);
+	gStack--;
 	/**
 	 * R0, SREG, R1
 	 */
-	*(UBaseType_t*)(gStack-2)  = 0x0;
-	*(UBaseType_t*)(gStack-3)  = 0x80;
-	*(UBaseType_t*)(gStack-4)  = 0x0;
-
-	/**
-	 * R2 ~ R31
-	 */
-	for (int i = 5; i < 35; i++) {
-		*(UBaseType_t*)(gStack-i) = 0x0;
-	}
+	*(UBaseType_t*)(gStack)  = 0x0;     // R0
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x80;    // SREG
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R1
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R2
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R3
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R4
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R5
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R6
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R7
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R8
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R9
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R10
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R11
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R12
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R13
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R14
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R15
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R16
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R17
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R18
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R19
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R20
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R21
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R22
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R23
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R24
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R25
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R26
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R27
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R28
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R29
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R30
+	gStack--;
+	*(UBaseType_t*)(gStack)  = 0x0;     // R31
+	gStack--;
 
 	/**
 	 * TODO: I need to read how to pass the argument to the funciton
@@ -311,14 +373,18 @@ BaseType_t xTaskCreate( TaskFunction_t pvTaskCode,
 	/**
 	 * Configure stack location
 	 */
-	newTask->task.SP_ctx[0] = (UBaseType_t)((gStack-34) & 0xFF);
-	newTask->task.SP_ctx[1] = (UBaseType_t)((gStack-34) >> 0x8);
+
+	newTask->task.SP_ctx = gStack;
 
 	/**
-	 * Decrease the stack to the next task
+	 * Inser the task into the List
 	 */
-	gStack = gStack - usStackDepth;
+	insertNewTask(newTask);
 
+
+	if (pxCreatedTask != NULL) {
+		*pxCreatedTask = newTask->id;
+	}
 
 	return TASK_OK;
 }
@@ -330,7 +396,7 @@ void vTaskDelete ( TaskHandle_t xTask ) {
 }
 
 
-void vTaskDelay (const UBaseType_t ms) {
+void vTaskDelay (const unsigned short ms) {
 	cli();
 
 	c_Task->tmr = ms;

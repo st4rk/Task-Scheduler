@@ -24,8 +24,8 @@
  */
 #define portRESTORE_CONTEXT() \
   asm volatile ( \
-    "lds r26, stack_ptr \n\t" \
-    "lds r27, stack_ptr + 1 \n\t" \
+    "lds r26, c_Task \n\t" \
+    "lds r27, c_Task + 1 \n\t" \
     "ld r28, x+ \n\t" \
     "out __SP_L__, r28 \n\t" \
     "ld r29, x+ \n\t" \
@@ -109,8 +109,8 @@
     "push r29 \n\t" \
     "push r30 \n\t" \
     "push r31 \n\t" \
-    "lds r26, stack_ptr \n\t" \
-    "lds r27, stack_ptr +1 \n\t" \
+    "lds r26, c_Task \n\t" \
+    "lds r27, c_Task +1 \n\t" \
     "in r0, __SP_L__ \n\t" \
     "st x+, r0  \n\t" \
     "in r0, __SP_H__ \n\t" \
@@ -136,11 +136,11 @@ typedef void (*TaskFunction_t)(void*);
  * Scheduler tasks that will be created in xTaskCreate
  */
 typedef struct task_t {
+    UBaseType_t* SP_ctx;
 	char name[configMAX_TASK_NAME_LEN];
 	UBaseType_t priority;
 	UBaseType_t state; 
-	UBaseType_t tmr;
-	UBaseType_t SP_ctx[2];
+	unsigned short tmr;
 } task_t;
 
 
@@ -220,7 +220,7 @@ extern "C" {
 #ifdef __cplusplus
 extern "C" {
 #endif
-	void vTaskDelay(const UBaseType_t ms);
+	void vTaskDelay(const unsigned short ms);
 #ifdef __cplusplus
 }
 #endif
