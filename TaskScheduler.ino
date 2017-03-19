@@ -8,6 +8,7 @@ void vIdleTask( void *args ) {
   
   while (1) {
     Serial.print('C');
+    digitalWrite(4, HIGH);
     delay(5000);
   }
 }
@@ -20,12 +21,13 @@ void vSpawnTask( void *args ) {
   
   while (1) {
     Serial.print('E');
-    delay(5000);
-
+    digitalWrite(3, HIGH);
     /** 
      * Sleep the task for 100 ms
      */
-    vTaskDelay(1000);
+    vTaskDelay(500);
+    digitalWrite(3, LOW);
+
   }
 }
 
@@ -36,6 +38,9 @@ void setup() {
    * Initialize the Serial
    */
   Serial.begin(9600);
+
+  pinMode(3, OUTPUT);
+  pinMode(4, OUTPUT);
 
   /**
    * Create a new task (idle)
